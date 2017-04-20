@@ -1,0 +1,168 @@
+---
+title: "Measles Vaccine Coverage"
+runtime: shiny
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    social: menu
+    theme: simplex
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(leaflet)
+library(dplyr)
+library(shiny)
+library(sp)
+library(plotly)
+
+
+thinnedvn <- readRDS("data/vietnam.rds")
+# thinnedvn <- readRDS("data/thinnedvietnam.rds")
+nat.vaccov <- readRDS("data/national_vaccov.rds")
+vietpop <- readRDS("data/viet_pop.rds")
+ave.vac <- readRDS("data/ave_vac.rds")
+
+sort_data <- function(year = 2001){
+  tmp <- grep(year,colnames(nat.vaccov))
+  dat.<- nat.vaccov[,c(1,tmp)]
+  colnames(dat.) <- c("province","coverage")
+  dat.$coverage <- dat.$coverage*100
+  dat.$grp <- cut(dat.$coverage, breaks = c(0, 50, 60,70,80,90,95,100), labels = c("<50", "50-60","60-70","70-80","80-90","90-95","95-100"))
+  thinnedvn@data<- left_join(thinnedvn@data,dat.)            
+  return(thinnedvn)  
+}
+
+fil <- function(x){x
+  x[which(x > 0.1 | x <= 1)]
+}
+
+
+```
+
+Sidebar {.sidebar}
+======================================================================
+
+
+
+```{r}
+selectInput("year", label = "Please choose a year to visualize the data", choices = 2001:2014 , selected = 2001 )
+get_data <- reactive({
+  sort_data(input$year)
+  })
+```
+```{r}
+
+```
+
+The vaccine coverage is provided from the Epidemiology department of National Institute of Hygiene and Epidemiology. 
+© Oxford University Clinical Research Unit - Hanoi and National Institute of Hygiene and Epidemiology.
+Visualization by Trinh Son Tung. __[Email](mailto:tung.trson@gmail.com)__
+
+
+Vaccine Coverage
+=======================================================================
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### Geographical first dose of Measle Vaccine Coverage
+
+```{r}
+#Leaflet map 
+output$map <- renderLeaflet({
+  map <- get_data()
+  fac_col <- colorFactor(c("#ffffb2","#fed976","#feb24c","#fd8d3c","pink","#bd0026", "#800026"),thinnedvn@data$grp)
+  leaflet(map) %>%
+    addProviderTiles('CartoDB.Positron') %>%
+    clearShapes() %>%
+    addPolygons(stroke = T , smoothFactor = .1 , fillOpacity = .5, color = ~fac_col(grp), layerId = ~province) %>%
+    addLegend("bottomleft", pal = fac_col, value  = ~grp, opacity = .5, title = "Coverage of 1st dose of measles vaccine")
+})
+
+#Click Event
+click_tract <- eventReactive(input$map_shape_click, {
+  
+  x <- input$map_shape_click
+  y <- x$id
+  # print(x)
+  return(y)
+  # print(y)
+  # return(names(x))
+})
+
+observe({
+  # print("clicked!")
+  # print(click_tract())
+  req(click_tract()) # do this if click_tract() is not null
+  # Add the clicked tract to the map in aqua, and remove when a new one is clicked
+  
+  
+  map <- leafletProxy('map') %>%
+    removeShape('dat') %>%
+    addPolygons(data = thinnedvn[thinnedvn$province == click_tract(), ], fill = FALSE,
+                color = 'lightblue', opacity = 1, layerId = 'dat')
+})
+
+prov_pop <- reactive({
+  return(vietpop[vietpop$province == click_tract(),])
+})
+
+pro_vac <- reactive(({
+  return(nat.vaccov[nat.vaccov$province == click_tract(),])  
+}))
+
+leafletOutput('map')
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### Province|City Information 
+
+```{r}
+output$info <- renderUI({
+  info <- paste("Province|City:",click_tract(),sep = " ")
+  pop <- paste("Population:",prov_pop()$population,"people",sep = " ")
+  area <- paste("Area:", prov_pop()$area,"km square", sep =" ")
+  density <- paste("Population density:",prov_pop()$population_density,"person/km square", sep =" ")  
+  # tmp <- paste(info, pop, area , density)
+  HTML(paste(info, pop , area, density, sep="<br/>"))
+})
+
+htmlOutput("info")
+
+```
+
+### Time-series Vaccine Coverage 
+
+```{r}
+output$plotly <- renderPlotly({
+  prov <- as.numeric((pro_vac()[,-1]*100))
+  ave.vac <- data.frame(ave.vac,prov)
+  plot_ly(data = ave.vac, x = ~time_vector, y = ~ave.cov, name = "National average coverage", mode = "lines" , line = list(color = "black", width = 4)) %>%
+    add_trace(y = ~ ave.cov, name = "National average coverage",line = list(color = "red", width = 4)) %>%
+    add_trace(y = ~ south_ave, name = "Southern average coverage",  line = list(color = "pink", width = 4 )) %>%
+    add_trace(y = ~ north_ave, name = "Northern average coverage", line = list(color = "blue", width = 4 )) %>%
+    add_trace(y = ~ central_ave, name = "Central average coverage", line = list(color = "green", width = 4)) %>%
+    add_trace(y = ~ prov, name = paste("Coverage of",click_tract(), sep = " "), line = list(color = "black", width = 4)) %>%
+    layout(title = "Coverage of Measles first dose vaccine",
+           xaxis = list(title = "Year"),
+           yaxis = list (title = "Coverage (Percent)"))
+})
+
+plotlyOutput("plotly")
+```
+
+About
+=======================================================================
+
+Measles is a contagious respiratory disease which can be transmissible by coughing and sneezing. The common symptons are fever,cough, running nose, red eyes and erythematous rash. Measles virus is related to childhood disease which children are the most infected one. After the introduction of Measles Containing Vaccine *(MCV)* in 1968 in Vietnam, the incidence rate has decreased substantially and *MCV* has became one of the key vaccines in the national Immunization Program. In 2014, Vietnam has experienced a severe measles outbreak which caused more than 15,033 confirmed cases [Based on the epidemiological data from NIHE] and 146 fatalities nationalwide [[1]](http://wwwnc.cdc.gov/eid/article/22/4/15-1595_article). Most of the severe cases were unvaccinated children who required hospitalization. This visualisation is a supplementary for our measles seroprevalence study. The data contains the vaccine coverage of the first dose of measles vaccine from the national Expanded Program on Immunization from 2001 to 2014.
+
+Data from [Oxford University Clinical Research Unit - Hanoi](www.oucru.org) & [Department of Epidemiology ,National Institute of Hygiene and Epidemiology](www.nihe.org.vn)
+
+![](image/oucru-logo-rgb-medium.jpg)
+![](image/nihe.jpg)
+
+
